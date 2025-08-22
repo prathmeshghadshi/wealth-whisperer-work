@@ -9,10 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Plus, 
-  Target, 
-  Pencil, 
+import {
+  Plus,
+  Target,
+  Pencil,
   Trash2,
   TrendingUp,
   TrendingDown,
@@ -50,14 +50,25 @@ const Budgets = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  
-  // Form state
-  const [formData, setFormData] = useState({
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+
+  // Form state for adding budget
+  const [addFormData, setAddFormData] = useState({
     name: '',
     amount: '',
     period: 'monthly',
     category_id: '',
     start_date: new Date().toISOString().split('T')[0]
+  });
+
+  // Form state for editing budget
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    amount: '',
+    period: 'monthly',
+    category_id: '',
+    start_date: ''
   });
 
   const fetchBudgets = async () => {
@@ -85,13 +96,10 @@ const Budgets = () => {
 
       if (error) throw error;
 
-      // Calculate spent amounts for each budget
       const budgetsWithSpent = await Promise.all(
         (budgetsData || []).map(async (budget) => {
           const currentDate = new Date();
           const startDate = new Date(budget.start_date);
-          
-          // Calculate end date based on period
           let endDate = new Date(budget.end_date || currentDate);
           if (!budget.end_date) {
             if (budget.period === 'monthly') {
@@ -103,7 +111,6 @@ const Budgets = () => {
             }
           }
 
-          // Fetch expenses for this budget period and category
           let query = supabase
             .from('expenses')
             .select('amount')
@@ -153,19 +160,19 @@ const Budgets = () => {
 
   const handleAddBudget = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!user || !formData.name || !formData.amount) return;
+
+    if (!user || !addFormData.name || !addFormData.amount) return;
 
     try {
       const { error } = await supabase
         .from('budgets')
         .insert([{
           user_id: user.id,
-          name: formData.name,
-          amount: parseFloat(formData.amount),
-          period: formData.period,
-          category_id: formData.category_id || null,
-          start_date: formData.start_date
+          name: addFormData.name,
+          amount: parseFloat(addFormData.amount),
+          period: addFormData.period,
+          category_id: addFormData.category_id || null,
+          start_date: addFormData.start_date
         }]);
 
       if (error) throw error;
@@ -176,7 +183,7 @@ const Budgets = () => {
       });
 
       setIsAddDialogOpen(false);
-      setFormData({
+      setAddFormData({
         name: '',
         amount: '',
         period: 'monthly',
@@ -184,12 +191,48 @@ const Budgets = () => {
         start_date: new Date().toISOString().split('T')[0]
       });
       fetchBudgets();
-
     } catch (error) {
       console.error('Error adding budget:', error);
       toast({
         title: "Error",
         description: "Failed to create budget",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEditBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!user || !editingBudget || !editFormData.name || !editFormData.amount) return;
+
+    try {
+      const { error } = await supabase
+        .from('budgets')
+        .update({
+          name: editFormData.name,
+          amount: parseFloat(editFormData.amount),
+          period: editFormData.period,
+          category_id: editFormData.category_id || null,
+          start_date: editFormData.start_date
+        })
+        .eq('id', editingBudget.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: "Budget updated successfully",
+      });
+
+      setIsEditDialogOpen(false);
+      setEditingBudget(null);
+      fetchBudgets();
+    } catch (error) {
+      console.error('Error updating budget:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update budget",
         variant: "destructive",
       });
     }
@@ -208,7 +251,7 @@ const Budgets = () => {
         title: "Success",
         description: "Budget deleted successfully",
       });
-      
+
       fetchBudgets();
     } catch (error) {
       console.error('Error deleting budget:', error);
@@ -218,6 +261,18 @@ const Budgets = () => {
         variant: "destructive",
       });
     }
+  };
+
+  const openEditDialog = (budget: Budget) => {
+    setEditingBudget(budget);
+    setEditFormData({
+      name: budget.name,
+      amount: budget.amount.toString(),
+      period: budget.period,
+      category_id: budget.categories?.id || '',
+      start_date: budget.start_date
+    });
+    setIsEditDialogOpen(true);
   };
 
   useEffect(() => {
@@ -251,12 +306,12 @@ const Budgets = () => {
           <h1 className="text-3xl font-bold text-foreground">Budgets</h1>
           <p className="text-muted-foreground">Set and track your spending limits</p>
         </div>
-        
+
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
             <Button className="flex items-center gap-2">
               <Plus className="h-4 w-4" />
-              Create Budget
+              Create New Budget
             </Button>
           </DialogTrigger>
           <DialogContent className="sm:max-w-[425px]">
@@ -272,8 +327,8 @@ const Budgets = () => {
                 <Input
                   id="name"
                   placeholder="e.g. Monthly Food Budget"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  value={addFormData.name}
+                  onChange={(e) => setAddFormData({ ...addFormData, name: e.target.value })}
                   required
                 />
               </div>
@@ -285,15 +340,15 @@ const Budgets = () => {
                   type="number"
                   step="0.01"
                   placeholder="0.00"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                  value={addFormData.amount}
+                  onChange={(e) => setAddFormData({ ...addFormData, amount: e.target.value })}
                   required
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="period">Period</Label>
-                <Select value={formData.period} onValueChange={(value) => setFormData({ ...formData, period: value })}>
+                <Select value={addFormData.period} onValueChange={(value) => setAddFormData({ ...addFormData, period: value })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -307,23 +362,24 @@ const Budgets = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="category">Category (Optional)</Label>
-                <Select value={formData.category_id} onValueChange={(value) => setFormData({ ...formData, category_id: value })}>
+                <Select value={addFormData.category_id} onValueChange={(value) => setAddFormData({ ...addFormData, category_id: value })}>
                   <SelectTrigger>
                     <SelectValue placeholder="All categories" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All categories</SelectItem>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-3 h-3 rounded-full" 
-                            style={{ backgroundColor: category.color }}
-                          />
-                          {category.name}
-                        </div>
-                      </SelectItem>
-                    ))}
+                    {(categories || [])
+                      .filter((category) => category.id && category.id.trim() !== "")
+                      .map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: category.color }}
+                            />
+                            {category.name}
+                          </div>
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -333,8 +389,8 @@ const Budgets = () => {
                 <Input
                   id="start_date"
                   type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
+                  value={addFormData.start_date}
+                  onChange={(e) => setAddFormData({ ...addFormData, start_date: e.target.value })}
                   required
                 />
               </div>
@@ -349,6 +405,99 @@ const Budgets = () => {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Edit Budget Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Budget</DialogTitle>
+            <DialogDescription>
+              Update your budget details.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleEditBudget} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Budget Name</Label>
+              <Input
+                id="edit-name"
+                placeholder="e.g. Monthly Food Budget"
+                value={editFormData.name}
+                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-amount">Budget Amount</Label>
+              <Input
+                id="edit-amount"
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={editFormData.amount}
+                onChange={(e) => setEditFormData({ ...editFormData, amount: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-period">Period</Label>
+              <Select value={editFormData.period} onValueChange={(value) => setEditFormData({ ...editFormData, period: value })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="yearly">Yearly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-category">Category (Optional)</Label>
+              <Select value={editFormData.category_id} onValueChange={(value) => setEditFormData({ ...editFormData, category_id: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(categories || [])
+                    .filter((category) => category.id && category.id.trim() !== "")
+                    .map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: category.color }}
+                          />
+                          {category.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-start_date">Start Date</Label>
+              <Input
+                id="edit-start_date"
+                type="date"
+                value={editFormData.start_date}
+                onChange={(e) => setEditFormData({ ...editFormData, start_date: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button type="submit" className="flex-1">Update Budget</Button>
+              <Button type="button" variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Budget Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -365,7 +514,7 @@ const Budgets = () => {
           budgets.map((budget) => {
             const progress = budget.spent ? (budget.spent / budget.amount) * 100 : 0;
             const { status, color, icon: StatusIcon } = getBudgetStatus(budget);
-            
+
             return (
               <Card key={budget.id} className="relative">
                 <CardHeader className="pb-3">
@@ -378,8 +527,8 @@ const Budgets = () => {
                         </Badge>
                         {budget.categories && (
                           <div className="flex items-center gap-1">
-                            <div 
-                              className="w-2 h-2 rounded-full" 
+                            <div
+                              className="w-2 h-2 rounded-full"
                               style={{ backgroundColor: budget.categories.color }}
                             />
                             <span className="text-xs">{budget.categories.name}</span>
@@ -388,11 +537,11 @@ const Budgets = () => {
                       </CardDescription>
                     </div>
                     <div className="flex gap-1">
-                      <Button variant="ghost" size="sm">
+                      <Button variant="ghost" size="sm" onClick={() => openEditDialog(budget)}>
                         <Pencil className="h-3 w-3" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteBudget(budget.id)}
                         className="text-destructive hover:text-destructive"
@@ -402,7 +551,7 @@ const Budgets = () => {
                     </div>
                   </div>
                 </CardHeader>
-                
+
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
@@ -417,13 +566,13 @@ const Budgets = () => {
                       <div className="flex items-center gap-1">
                         <StatusIcon className={`h-3 w-3 ${color}`} />
                         <span className={color}>
-                          {status === 'exceeded' ? 'Over budget' : 
-                           status === 'warning' ? 'Close to limit' : 'On track'}
+                          {status === 'exceeded' ? 'Over budget' :
+                            status === 'warning' ? 'Close to limit' : 'On track'}
                         </span>
                       </div>
                     </div>
                   </div>
-                  
+
                   <div className="text-xs text-muted-foreground">
                     Remaining: ${Math.max(0, budget.amount - (budget.spent || 0)).toFixed(2)}
                   </div>

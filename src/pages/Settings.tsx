@@ -40,7 +40,8 @@ const CURRENCY_OPTIONS = [
   { value: 'GBP', label: 'British Pound (£)' },
   { value: 'JPY', label: 'Japanese Yen (¥)' },
   { value: 'CAD', label: 'Canadian Dollar (C$)' },
-  { value: 'AUD', label: 'Australian Dollar (A$)' }
+  { value: 'AUD', label: 'Australian Dollar (A$)' },
+  { value: 'INR', label: 'Indian Rupees (₹)' }
 ];
 
 const CATEGORY_COLORS = [
