@@ -8,10 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Settings as SettingsIcon, 
-  User, 
-  Palette, 
+import {
+  Settings as SettingsIcon,
+  User,
+  Palette,
   Plus,
   Edit,
   Trash2,
@@ -128,6 +128,11 @@ const Settings = () => {
 
       if (error) throw error;
 
+      const { error: authError } = await supabase.auth.updateUser({
+        data: { display_name: profileForm.full_name }
+      });
+      if (authError) throw authError;
+
       toast({
         title: "Success",
         description: "Profile updated successfully",
@@ -195,7 +200,7 @@ const Settings = () => {
         title: "Success",
         description: "Category deleted successfully",
       });
-      
+
       fetchCategories();
     } catch (error) {
       console.error('Error deleting category:', error);
@@ -279,8 +284,8 @@ const Settings = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="currency">Preferred Currency</Label>
-                  <Select 
-                    value={profileForm.currency} 
+                  <Select
+                    value={profileForm.currency}
                     onValueChange={(value) => setProfileForm({ ...profileForm, currency: value })}
                   >
                     <SelectTrigger>
@@ -302,9 +307,9 @@ const Settings = () => {
                   <Save className="h-4 w-4" />
                   Save Changes
                 </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={() => setIsEditingProfile(false)}
                 >
                   Cancel
@@ -353,9 +358,8 @@ const Settings = () => {
                       <button
                         key={color}
                         type="button"
-                        className={`w-8 h-8 rounded-full border-2 ${
-                          newCategory.color === color ? 'border-foreground' : 'border-transparent'
-                        }`}
+                        className={`w-8 h-8 rounded-full border-2 ${newCategory.color === color ? 'border-foreground' : 'border-transparent'
+                          }`}
                         style={{ backgroundColor: color }}
                         onClick={() => setNewCategory({ ...newCategory, color })}
                       />
@@ -384,8 +388,8 @@ const Settings = () => {
                 categories.map((category) => (
                   <div key={category.id} className="flex items-center justify-between p-3 border rounded-lg">
                     <div className="flex items-center gap-3">
-                      <div 
-                        className="w-4 h-4 rounded-full" 
+                      <div
+                        className="w-4 h-4 rounded-full"
                         style={{ backgroundColor: category.color }}
                       />
                       <span className="font-medium">{category.name}</span>
