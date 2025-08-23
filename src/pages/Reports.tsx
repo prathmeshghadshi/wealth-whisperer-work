@@ -6,31 +6,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { 
-  BarChart3, 
-  TrendingUp, 
-  TrendingDown, 
+import {
+  BarChart3,
+  TrendingUp,
+  TrendingDown,
   Calendar,
   PieChart,
   DollarSign,
-  Target
+  Target,
+  Download
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  PieChart as RechartsPieChart, 
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  PieChart as RechartsPieChart,
   Pie,
-  Cell, 
-  LineChart, 
+  Cell,
+  LineChart,
   Line,
   Legend
 } from 'recharts';
 import { useToast } from '@/hooks/use-toast';
+import ExcelDownload from '@/components/ExcelDownload';
 
 interface MonthlyData {
   month: string;
@@ -165,9 +167,9 @@ const Reports = () => {
       expensesData?.forEach(expense => {
         const date = new Date(expense.expense_date);
         const monthKey = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-        
+
         totalExpenses += Number(expense.amount);
-        
+
         // Monthly data
         const current = monthlyMap.get(monthKey) || { expenses: 0, budget: 0 };
         current.expenses += Number(expense.amount);
@@ -176,9 +178,9 @@ const Reports = () => {
         // Category data
         if (expense.categories) {
           const categoryKey = expense.categories.name;
-          const currentCategory = categoryMap.get(categoryKey) || { 
-            amount: 0, 
-            color: expense.categories.color 
+          const currentCategory = categoryMap.get(categoryKey) || {
+            amount: 0,
+            color: expense.categories.color
           };
           currentCategory.amount += Number(expense.amount);
           categoryMap.set(categoryKey, currentCategory);
@@ -187,8 +189,8 @@ const Reports = () => {
 
       // Calculate monthly budgets
       const totalBudget = budgetData?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
-      const monthlyBudget = (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month') 
-        ? totalBudget 
+      const monthlyBudget = (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month')
+        ? totalBudget
         : totalBudget / monthsBack;
 
       // Convert maps to arrays
@@ -214,7 +216,7 @@ const Reports = () => {
         trendStartDate = startDate;
       }
       const dailyExpenses = new Map<string, number>();
-      
+
       expensesData?.forEach(expense => {
         const expenseDate = new Date(expense.expense_date);
         if (expenseDate >= trendStartDate) {
@@ -303,6 +305,53 @@ const Reports = () => {
   }
 
   const COLORS = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+  // Excel sheet configurations
+  const excelSheets = [
+    {
+      sheetName: 'Key Metrics',
+      data: [
+        { metric: 'Total Expenses', value: totalStats.totalExpenses },
+        { metric: 'Daily Average', value: totalStats.averageDaily },
+        { metric: 'Total Budget', value: totalStats.totalBudget },
+        { metric: 'Savings Rate', value: totalStats.savingsRate }
+      ],
+      columns: [
+        { key: 'metric', header: 'Metric' },
+        {
+          key: 'value', header: 'Value', format: (value, row) =>
+            row.metric === 'Savings Rate' ? `${value.toFixed(1)}%` : formatCurrency(value, currency)
+        }
+      ]
+    },
+    {
+      sheetName: 'Monthly Overview',
+      data: monthlyData,
+      columns: [
+        { key: 'month', header: 'Month' },
+        { key: 'expenses', header: 'Expenses', format: (value) => formatCurrency(value, currency) },
+        { key: 'budget', header: 'Budget', format: (value) => formatCurrency(value, currency) }
+      ],
+      chartId: 'monthly-overview-chart'
+    },
+    {
+      sheetName: 'Category Breakdown',
+      data: categoryData,
+      columns: [
+        { key: 'name', header: 'Category' },
+        { key: 'amount', header: 'Amount', format: (value) => formatCurrency(value, currency) },
+        { key: 'percentage', header: 'Percentage', format: (value) => `${value.toFixed(1)}%` }
+      ],
+      chartId: 'category-breakdown-chart'
+    },
+    {
+      sheetName: 'Daily Trend',
+      data: trendData,
+      columns: [
+        { key: 'date', header: 'Date' },
+        { key: 'amount', header: 'Amount', format: (value) => formatCurrency(value, currency) }
+      ], chartId: 'daily-trend-chart'
+    }
+  ];
 
   return (
     <div className="space-y-6">
@@ -312,7 +361,7 @@ const Reports = () => {
           <h1 className="text-3xl font-bold text-foreground">Reports & Analytics</h1>
           <p className="text-muted-foreground">Insights into your spending patterns</p>
         </div>
-        
+
         <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
           <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger className="w-[180px]">
@@ -336,6 +385,11 @@ const Reports = () => {
               max={`${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}`}
             />
           )}
+          <ExcelDownload
+            sheets={excelSheets}
+            fileName="Expense_Report"
+            disabled={loading || (timeRange === 'custom_month' && !customMonth)}
+          />
         </div>
       </div>
 
@@ -406,6 +460,7 @@ const Reports = () => {
             <CardDescription>Expenses vs Budget comparison</CardDescription>
           </CardHeader>
           <CardContent>
+          <div id="monthly-overview-chart">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={monthlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -417,6 +472,7 @@ const Reports = () => {
                 <Bar dataKey="budget" fill="#10B981" name="Budget" />
               </BarChart>
             </ResponsiveContainer>
+          </div>
           </CardContent>
         </Card>
 
@@ -431,7 +487,7 @@ const Reports = () => {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col lg:flex-row items-center gap-4">
-              <div className="w-full lg:w-2/3">
+              <div id="category-breakdown-chart" className="w-full lg:w-2/3">
                 <ResponsiveContainer width="100%" height={200}>
                   <RechartsPieChart>
                     <Pie
@@ -453,8 +509,8 @@ const Reports = () => {
               <div className="w-full lg:w-1/3 space-y-2">
                 {categoryData.map((category, index) => (
                   <div key={index} className="flex items-center gap-2 text-sm">
-                    <div 
-                      className="w-3 h-3 rounded-full" 
+                    <div
+                      className="w-3 h-3 rounded-full"
                       style={{ backgroundColor: category.color || COLORS[index % COLORS.length] }}
                     />
                     <span className="flex-1">{category.name}</span>
@@ -481,21 +537,23 @@ const Reports = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
+        <div id="daily-trend-chart">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={trendData}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip formatter={(value) => formatCurrency(Number(value), currency)} />
-              <Line 
-                type="monotone" 
-                dataKey="amount" 
-                stroke="#3B82F6" 
+              <Line
+                type="monotone"
+                dataKey="amount"
+                stroke="#3B82F6"
                 strokeWidth={2}
                 dot={{ fill: '#3B82F6' }}
               />
             </LineChart>
           </ResponsiveContainer>
+          </div>
         </CardContent>
       </Card>
     </div>
