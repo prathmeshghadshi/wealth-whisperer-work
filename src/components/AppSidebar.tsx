@@ -59,7 +59,7 @@ export function AppSidebar() {
             <div>
               <h2 className="font-semibold text-sidebar-foreground">Expense Tracker</h2>
               <p className="text-xs text-sidebar-foreground/70">
-                Welcome, {user?.user_metadata?.full_name || 'User'}
+                Welcome, {user?.user_metadata?.display_name|| 'User'}
               </p>
             </div>
           )}
