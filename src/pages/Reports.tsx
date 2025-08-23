@@ -3,7 +3,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { formatCurrency } from '@/utils/formatCurrency';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -28,6 +30,7 @@ import {
   Line,
   Legend
 } from 'recharts';
+import { useToast } from '@/hooks/use-toast';
 
 interface MonthlyData {
   month: string;
@@ -49,8 +52,10 @@ interface TrendData {
 
 const Reports = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState('6months');
+  const [customMonth, setCustomMonth] = useState('');
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
   const [trendData, setTrendData] = useState<TrendData[]>([]);
@@ -60,17 +65,75 @@ const Reports = () => {
     totalBudget: 0,
     savingsRate: 0
   });
+  const [currency, setCurrency] = useState('USD');
+
+  // Set customMonth to current month when timeRange changes to 'custom_month'
+  useEffect(() => {
+    if (timeRange === 'custom_month') {
+      const currentDate = new Date();
+      const currentMonth = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+      setCustomMonth(currentMonth); // Default to current month (e.g., '2025-08')
+    } else {
+      setCustomMonth(''); // Clear customMonth for other time ranges
+    }
+  }, [timeRange]);
+
+  const fetchProfile = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('currency')
+        .eq('user_id', user.id)
+        .single();
+      if (error && error.code !== 'PGRST116') throw error;
+      console.log('Profile fetched:', data); // Debug log
+      setCurrency(data?.currency || 'USD');
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load profile data",
+        variant: "destructive",
+      });
+    }
+  };
 
   const fetchReportsData = async () => {
     if (!user) return;
+    if (timeRange === 'custom_month' && !customMonth) {
+      setLoading(false); // Prevent fetching until a month is selected
+      return;
+    }
 
     try {
       const currentDate = new Date();
-      const monthsBack = timeRange === '6months' ? 6 : timeRange === '12months' ? 12 : 3;
-      const startDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - monthsBack, 1);
-      
+      let startDate: Date;
+      let endDate: Date;
+      let monthsBack: number;
+
+      // Determine date range based on timeRange
+      if (timeRange === 'this_month') {
+        startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+        monthsBack = 1;
+      } else if (timeRange === 'last_month') {
+        startDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+        endDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0);
+        monthsBack = 1;
+      } else if (timeRange === 'custom_month' && customMonth) {
+        const [year, month] = customMonth.split('-').map(Number);
+        startDate = new Date(year, month - 1, 1);
+        endDate = new Date(year, month, 0);
+        monthsBack = 1;
+      } else {
+        monthsBack = timeRange === '6months' ? 6 : timeRange === '12months' ? 12 : 3;
+        startDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - monthsBack, 1);
+        endDate = currentDate;
+      }
+
       // Fetch expenses data
-      const { data: expensesData } = await supabase
+      const { data: expensesData, error: expensesError } = await supabase
         .from('expenses')
         .select(`
           amount,
@@ -79,13 +142,20 @@ const Reports = () => {
         `)
         .eq('user_id', user.id)
         .gte('expense_date', startDate.toISOString().split('T')[0])
+        .lte('expense_date', endDate.toISOString().split('T')[0])
         .order('expense_date');
 
+      if (expensesError) throw expensesError;
+
       // Fetch budget data
-      const { data: budgetData } = await supabase
+      const { data: budgetData, error: budgetError } = await supabase
         .from('budgets')
-        .select('amount, period')
-        .eq('user_id', user.id);
+        .select('amount, period, start_date, end_date')
+        .eq('user_id', user.id)
+        .gte('start_date', (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month') ? startDate.toISOString().split('T')[0] : undefined)
+        .lte('end_date', (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month') ? endDate.toISOString().split('T')[0] : undefined);
+
+      if (budgetError) throw budgetError;
 
       // Process monthly data
       const monthlyMap = new Map<string, { expenses: number; budget: number }>();
@@ -115,9 +185,11 @@ const Reports = () => {
         }
       });
 
-      // Calculate monthly budgets (simplified - using total budget divided by months)
+      // Calculate monthly budgets
       const totalBudget = budgetData?.reduce((sum, b) => sum + Number(b.amount), 0) || 0;
-      const monthlyBudget = totalBudget;
+      const monthlyBudget = (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month') 
+        ? totalBudget 
+        : totalBudget / monthsBack;
 
       // Convert maps to arrays
       const monthlyDataArray: MonthlyData[] = Array.from(monthlyMap.entries()).map(([month, data]) => ({
@@ -136,21 +208,25 @@ const Reports = () => {
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 6);
 
-      // Generate trend data (last 30 days)
-      const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      // Generate trend data (last 30 days for multi-month, full month for single-month)
+      let trendStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      if (timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month') {
+        trendStartDate = startDate;
+      }
       const dailyExpenses = new Map<string, number>();
       
       expensesData?.forEach(expense => {
         const expenseDate = new Date(expense.expense_date);
-        if (expenseDate >= last30Days) {
+        if (expenseDate >= trendStartDate) {
           const dateKey = expenseDate.toISOString().split('T')[0];
           dailyExpenses.set(dateKey, (dailyExpenses.get(dateKey) || 0) + Number(expense.amount));
         }
       });
 
       const trendDataArray: TrendData[] = [];
-      for (let i = 29; i >= 0; i--) {
-        const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+      const daysInPeriod = Math.floor((endDate.getTime() - trendStartDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      for (let i = daysInPeriod - 1; i >= 0; i--) {
+        const date = new Date(trendStartDate.getTime() + i * 24 * 60 * 60 * 1000);
         const dateKey = date.toISOString().split('T')[0];
         trendDataArray.push({
           date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
@@ -159,7 +235,7 @@ const Reports = () => {
       }
 
       // Calculate stats
-      const daysInRange = Math.floor((currentDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      const daysInRange = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
       const averageDaily = daysInRange > 0 ? totalExpenses / daysInRange : 0;
       const savingsRate = totalBudget > 0 ? ((totalBudget - totalExpenses) / totalBudget) * 100 : 0;
 
@@ -175,6 +251,11 @@ const Reports = () => {
 
     } catch (error) {
       console.error('Error fetching reports data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load reports data",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -182,9 +263,36 @@ const Reports = () => {
 
   useEffect(() => {
     if (user) {
-      fetchReportsData();
+      Promise.all([fetchProfile(), fetchReportsData()]).finally(() => {
+        setLoading(false);
+      });
     }
-  }, [user, timeRange]);
+  }, [user, timeRange, customMonth]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const subscription = supabase
+      .channel('profile-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('Profile update received:', payload); // Debug log
+          setCurrency(payload.new.currency || 'USD');
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user]);
 
   if (loading) {
     return (
@@ -205,16 +313,30 @@ const Reports = () => {
           <p className="text-muted-foreground">Insights into your spending patterns</p>
         </div>
         
-        <Select value={timeRange} onValueChange={setTimeRange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="3months">Last 3 months</SelectItem>
-            <SelectItem value="6months">Last 6 months</SelectItem>
-            <SelectItem value="12months">Last 12 months</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="this_month">This month</SelectItem>
+              <SelectItem value="last_month">Last month</SelectItem>
+              <SelectItem value="custom_month">Select a month</SelectItem>
+              <SelectItem value="3months">Last 3 months</SelectItem>
+              <SelectItem value="6months">Last 6 months</SelectItem>
+              <SelectItem value="12months">Last 12 months</SelectItem>
+            </SelectContent>
+          </Select>
+          {timeRange === 'custom_month' && (
+            <Input
+              type="month"
+              value={customMonth}
+              onChange={(e) => setCustomMonth(e.target.value)}
+              className="w-[180px]"
+              max={`${new Date().getFullYear()}-${(new Date().getMonth() + 1).toString().padStart(2, '0')}`}
+            />
+          )}
+        </div>
       </div>
 
       {/* Key Metrics */}
@@ -225,10 +347,8 @@ const Reports = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalStats.totalExpenses.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              This period
-            </p>
+            <div className="text-2xl font-bold">{formatCurrency(totalStats.totalExpenses, currency)}</div>
+            <p className="text-xs text-muted-foreground">This period</p>
           </CardContent>
         </Card>
 
@@ -238,10 +358,8 @@ const Reports = () => {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalStats.averageDaily.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              Per day
-            </p>
+            <div className="text-2xl font-bold">{formatCurrency(totalStats.averageDaily, currency)}</div>
+            <p className="text-xs text-muted-foreground">Per day</p>
           </CardContent>
         </Card>
 
@@ -251,10 +369,8 @@ const Reports = () => {
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalStats.totalBudget.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              Active budgets
-            </p>
+            <div className="text-2xl font-bold">{formatCurrency(totalStats.totalBudget, currency)}</div>
+            <p className="text-xs text-muted-foreground">Active budgets</p>
           </CardContent>
         </Card>
 
@@ -280,7 +396,7 @@ const Reports = () => {
 
       {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Monthly Expenses vs Budget */}
+        {/* Monthly Overview */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -295,7 +411,7 @@ const Reports = () => {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip formatter={(value) => formatCurrency(Number(value), currency)} />
                 <Legend />
                 <Bar dataKey="expenses" fill="#3B82F6" name="Expenses" />
                 <Bar dataKey="budget" fill="#10B981" name="Budget" />
@@ -330,7 +446,7 @@ const Reports = () => {
                         <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip formatter={(value) => formatCurrency(Number(value), currency)} />
                   </RechartsPieChart>
                 </ResponsiveContainer>
               </div>
@@ -342,7 +458,7 @@ const Reports = () => {
                       style={{ backgroundColor: category.color || COLORS[index % COLORS.length] }}
                     />
                     <span className="flex-1">{category.name}</span>
-                    <span className="font-medium">${category.amount.toFixed(0)}</span>
+                    <span className="font-medium">{formatCurrency(category.amount, currency)}</span>
                   </div>
                 ))}
               </div>
@@ -358,7 +474,11 @@ const Reports = () => {
             <TrendingUp className="h-5 w-5" />
             Daily Spending Trend
           </CardTitle>
-          <CardDescription>Last 30 days spending pattern</CardDescription>
+          <CardDescription>
+            {timeRange === 'this_month' || timeRange === 'last_month' || timeRange === 'custom_month'
+              ? 'Spending pattern for selected month'
+              : 'Last 30 days spending pattern'}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
@@ -366,7 +486,7 @@ const Reports = () => {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="date" />
               <YAxis />
-              <Tooltip />
+              <Tooltip formatter={(value) => formatCurrency(Number(value), currency)} />
               <Line 
                 type="monotone" 
                 dataKey="amount" 

@@ -4,16 +4,25 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { 
-  DollarSign, 
-  TrendingUp, 
-  TrendingDown, 
+import { formatCurrency } from '@/utils/formatCurrency';
+import {
+  DollarSign,
+  TrendingUp,
+  TrendingDown,
   Target,
   Plus,
   Calendar,
   Receipt
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import AddExpenseDialog from '@/components/AddExpenseDialog';
+
+interface Category {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+}
 
 interface DashboardStats {
   totalExpenses: number;
@@ -36,6 +45,46 @@ const Dashboard = () => {
     categoriesSpending: []
   });
   const [loading, setLoading] = useState(true);
+  const [currency, setCurrency] = useState('USD');
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  const fetchCategories = async () => {
+    if (!user) return;
+
+    try {
+      const { data: categoriesData, error } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('name');
+
+      if (error) throw error;
+
+      setCategories(categoriesData || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load categories",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const fetchCurrency = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('currency')
+        .eq('user_id', user.id)
+        .single();
+      if (error) throw error;
+      setCurrency(data.currency || 'USD');
+    } catch (error) {
+      console.error('Error fetching currency:', error);
+    }
+  };
 
   const fetchDashboardData = async () => {
     if (!user) return;
@@ -101,9 +150,9 @@ const Dashboard = () => {
       categorySpendingData?.forEach(expense => {
         if (expense.categories) {
           const categoryName = expense.categories.name;
-          const current = categoryMap.get(categoryName) || { 
-            ...expense.categories, 
-            amount: 0 
+          const current = categoryMap.get(categoryName) || {
+            ...expense.categories,
+            amount: 0
           };
           current.amount += Number(expense.amount);
           categoryMap.set(categoryName, current);
@@ -130,13 +179,15 @@ const Dashboard = () => {
         description: "Failed to load dashboard data",
         variant: "destructive",
       });
-    } finally {
-      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    if (user) {
+      Promise.all([fetchDashboardData(), fetchCategories(), fetchCurrency()]).finally(() => {
+        setLoading(false);
+      });
+    }
   }, [user]);
 
   if (loading) {
@@ -157,10 +208,12 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground">Overview of your financial activity</p>
         </div>
-        <Button className="flex items-center gap-2">
-          <Plus className="h-4 w-4" />
-          Add Expense
-        </Button>
+        <AddExpenseDialog categories={categories} currency={currency} onSuccess={fetchDashboardData}>
+          <Button className="flex items-center gap-2">
+            <Plus className="h-4 w-4" />
+            Add Expense
+          </Button>
+        </AddExpenseDialog>
       </div>
 
       {/* Stats Cards */}
@@ -171,7 +224,7 @@ const Dashboard = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.totalExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(stats.totalExpenses, currency)}</div>
             <p className="text-xs text-muted-foreground">All time total</p>
           </CardContent>
         </Card>
@@ -182,7 +235,7 @@ const Dashboard = () => {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${stats.monthlyExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold">{formatCurrency(stats.monthlyExpenses, currency)}</div>
             <p className="text-xs text-muted-foreground">Monthly spending</p>
           </CardContent>
         </Card>
@@ -195,9 +248,7 @@ const Dashboard = () => {
           <CardContent>
             <div className="text-2xl font-bold">{budgetProgress.toFixed(0)}%</div>
             <Progress value={budgetProgress} className="mt-2" />
-            <p className="text-xs text-muted-foreground mt-1">
-              ${stats.budgetUsed.toFixed(2)} of ${stats.totalBudget.toFixed(2)}
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">{formatCurrency(stats.budgetUsed, currency)} of {formatCurrency(stats.totalBudget, currency)}</p>
           </CardContent>
         </Card>
 
@@ -207,9 +258,7 @@ const Dashboard = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              ${(stats.monthlyExpenses / new Date().getDate()).toFixed(2)}
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(stats.monthlyExpenses / new Date().getDate(), currency)}</div>
             <p className="text-xs text-muted-foreground">This month</p>
           </CardContent>
         </Card>
@@ -236,7 +285,7 @@ const Dashboard = () => {
                 stats.recentExpenses.map((expense) => (
                   <div key={expense.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div 
+                      <div
                         className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-medium"
                         style={{ backgroundColor: expense.categories?.color || '#6B7280' }}
                       >
@@ -250,7 +299,7 @@ const Dashboard = () => {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="font-medium">-${Number(expense.amount).toFixed(2)}</p>
+                      <p className="font-medium">-{formatCurrency(Number(expense.amount), currency)}</p>
                     </div>
                   </div>
                 ))
@@ -279,17 +328,17 @@ const Dashboard = () => {
                   <div key={index} className="space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div 
+                        <div
                           className="w-4 h-4 rounded-full"
                           style={{ backgroundColor: category.color }}
                         />
                         <span className="font-medium">{category.name}</span>
                       </div>
-                      <span className="font-medium">${category.amount.toFixed(2)}</span>
+                      <span className="font-medium">{formatCurrency(category.amount, currency)}</span>
                     </div>
-                    <Progress 
-                      value={stats.monthlyExpenses > 0 ? (category.amount / stats.monthlyExpenses) * 100 : 0} 
-                      className="h-2" 
+                    <Progress
+                      value={stats.monthlyExpenses > 0 ? (category.amount / stats.monthlyExpenses) * 100 : 0}
+                      className="h-2"
                     />
                   </div>
                 ))
